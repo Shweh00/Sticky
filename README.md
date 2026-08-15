@@ -1,86 +1,77 @@
-# Floating To Do
+# Sticky
 
-Floating To Do 是一个原生 macOS 菜单栏浮窗 App。它用于在终端、浏览器、编辑器或 Obsidian 之外快速记录待办，不占用 Dock，并将当前待办单向写入本地 Obsidian Markdown。
+Sticky 是一个轻量的 macOS 菜单栏待办应用，支持全局快捷键、多个标签、Apple 提醒事项，以及与 Obsidian Markdown 的双向同步。
 
-它不是 Obsidian 插件本体。当前项目的主体是 Swift 原生 App；`web/` 仅用于验证交互的浏览器原型。
+## 下载与使用
 
-## 当前能力
+1. 在仓库右侧打开 **Releases**，下载 `Sticky-macOS-universal.zip`。
+2. 解压后将 `Sticky.app` 拖入“应用程序”。
+3. 第一次启动时右键点按 App，选择“打开”。
+4. 使用 `⌥⌘S` 在任何应用中显示或隐藏 Sticky。
 
-- 菜单栏左键呼出或隐藏浮窗，鼠标离开后自动收起。
-- 全局悬浮，支持多个桌面空间和全屏应用。
-- 多便贴页、双击编辑页面标题、快速添加待办。
-- 点击完成、双击编辑任务、拖拽抓手排序未完成任务。
-- 任务备注入口、完成音效和彩纸反馈。
-- 删除后可在 6 秒内撤销。
-- 菜单栏右键可复制当前工作区的 Markdown。
-- 本地 JSON 保存、最近一次成功数据备份和 Obsidian Markdown 单向同步。
+支持 macOS 14 或更高版本，并同时支持 Apple 芯片与 Intel Mac。
 
-## 运行与安装
+## 功能
 
-开发运行：
+- 全局快捷键呼出或隐藏悬浮窗。
+- 多标签管理；可拖动标签排序，并根据位置自动显示协调的优先级颜色。
+- 粉、蓝、绿三套主题色。
+- 每个标签内自动将未完成事项排在已完成事项之前。
+- 新增、编辑、删除、完成、拖动事项，并支持备注、提示音、彩纸反馈和删除撤销。
+- 可为单个事项建立 Apple 提醒事项；不可用时回退到本地通知。
+- 与 Obsidian Markdown 双向同步，包括标签、事项、完成状态及标题/文件名。
+- 本地数据保存与最近一次成功数据备份。
 
-```bash
-swift build
-./.build/debug/FloatingTodo
-```
+## Obsidian 连接
 
-安装原生 App：
-
-```bash
-./script/install_swift_app.sh
-```
-
-脚本会 release 构建并安装到 `/Applications/FloatingTodo.app`。替换前会核验 Bundle ID `com.cmi.floatingtodo`，旧版本会移入废纸篓备份。
-
-## 数据与 Obsidian 同步
-
-本地数据位于：
+首次运行时，默认同步文件为：
 
 ```text
-~/.floating-todo/todos.json
+~/Documents/Sticky/Floating Todo.md
 ```
 
-每次成功保存前会保留上一份数据：
-
-```text
-~/.floating-todo/todos.json.bak
-```
-
-默认 Markdown 输出位置：
-
-```text
-/Users/andreas/cmi社区知识库/CMI/Obsidian sticker.md
-```
-
-同步为 App 到 Markdown 的单向写入。直接编辑 Markdown 不会回写到 App，也没有冲突合并能力。
-
-若 Obsidian 文件路径不同，可创建：
+若要连接自己的 Obsidian 库，请创建或编辑：
 
 ```text
 ~/.floating-todo/config.json
 ```
 
-内容如下：
+示例：
 
 ```json
 {
-  "obsidianMarkdownPath": "/你的/Obsidian/仓库/Floating Todo.md"
+  "obsidianMarkdownPath": "/Users/你的用户名/Obsidian/Sticky/Floating Todo.md"
 }
 ```
 
-保存或同步失败时，浮窗顶部会显示数据提醒图标，菜单栏右键菜单会显示具体状态。主数据无法读取时，App 会尝试使用最近一次备份恢复。
+Sticky 会在安全标记范围内更新任务，并监听 Obsidian 中的改动。标题改名时，对应的 Markdown 文件名也会同步调整。
 
-## Obsidian Launcher 边界
+## Apple 提醒事项
 
-README 历史上提到过 `floating-todo-launcher`。该 launcher 不在本仓库中，因此不能视为当前项目已交付的一部分。Floating To Do 可独立启动；如需随 Obsidian 启动，应在 launcher 所在项目中单独维护安装方式和路径。
+第一次添加提醒时，请允许 Sticky 访问“提醒事项”和发送通知。若曾拒绝，可在“系统设置 → 隐私与安全性 → 提醒事项”中重新开启。
 
-## 开发验证
+## 从源码安装
+
+需要 Xcode Command Line Tools：
 
 ```bash
-swift build
+git clone https://github.com/SEA-ledger/Sticky.git
+cd Sticky
+./script/install_swift_app.sh
 ```
 
-当前本机 Command Line Tools 未提供 `XCTest` 或 Swift `Testing` 模块。数据层以一次性同模块验证程序覆盖了删除撤销、Markdown 写入和备份恢复；后续接入完整 Xcode 后，应将这三条验证迁移为正式单元测试。
+安装脚本会构建 Intel 与 Apple 芯片通用版本、本地签名，并安装到 `/Applications/Sticky.app`。已有版本会先安全移入废纸篓备份。
+
+## 数据安全
+
+本地数据与备份分别保存在：
+
+```text
+~/.floating-todo/todos.json
+~/.floating-todo/todos.json.bak
+```
+
+这些个人数据不会包含在仓库或发布安装包中。
 
 ## License
 

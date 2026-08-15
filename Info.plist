@@ -20,5 +20,7 @@
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>用于把 Sticky 中设置时间的待办同步到 Apple 提醒事项，并保持标题、备注和完成状态一致。</string>
 </dict>
 </plist>

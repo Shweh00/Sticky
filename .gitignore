@@ -1,6 +1,8 @@
 .build/
 .swiftpm/
 dist/
+FloatingTodo.app/
+.claude/
 web/node_modules/
 web/.npm-cache/
 web/dist/

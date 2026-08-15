@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import AppKit
 
 // MARK: - Design Tokens
@@ -11,7 +10,6 @@ private enum Theme {
     static let textTertiary = Color.primary.opacity(0.2)
     static let accent = Color.primary
     static let accentSoft = Color.primary.opacity(0.04)
-    static let brand = Color(red: 0.46, green: 0.40, blue: 0.76)
     static let danger = Color.primary.opacity(0.4)
     static let dangerSoft = Color.primary.opacity(0.03)
     static let success = Color.primary.opacity(0.25)
@@ -37,6 +35,30 @@ private enum Theme {
 
 // MARK: - Notebook Paper Palette
 
+private enum StickyColorTheme: String, CaseIterable, Identifiable {
+    case rose
+    case mistBlue
+    case sage
+
+    var id: String { rawValue }
+
+    var hue: Double {
+        switch self {
+        case .rose: return 0.955
+        case .mistBlue: return 0.58
+        case .sage: return 0.39
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .rose: return "樱花粉"
+        case .mistBlue: return "雾霭蓝"
+        case .sage: return "鼠尾草绿"
+        }
+    }
+}
+
 private struct NotebookPaperStyle {
     let paper: Color
     let paperHighlight: Color
@@ -44,21 +66,47 @@ private struct NotebookPaperStyle {
     let tabEdge: Color
     let ink: Color
     let composerControl: Color
+    let brand: Color
+    let priorityHigh: Color
+    let priorityLow: Color
 }
 
 private enum NotebookPaperPalette {
-    static let defaultHue = 0.57
-
-    // NOTE: 页面仍保存历史色相，避免触碰用户数据；视觉上统一使用固定粉白主题。
-    static func style(hue _: Double?) -> NotebookPaperStyle {
+    static func style(theme: StickyColorTheme) -> NotebookPaperStyle {
         return NotebookPaperStyle(
-            paper: Color(red: 1.0, green: 0.957, blue: 0.965),
-            paperHighlight: Color(red: 1.0, green: 0.988, blue: 0.99),
-            tab: Color(red: 0.949, green: 0.741, blue: 0.796),
-            tabEdge: Color(red: 0.549, green: 0.353, blue: 0.412),
-            ink: Color(red: 0.322, green: 0.216, blue: 0.251),
-            composerControl: Color(red: 0.98, green: 0.925, blue: 0.94)
+            paper: color(theme, saturation: 0.043, brightness: 1.0),
+            paperHighlight: color(theme, saturation: 0.012, brightness: 1.0),
+            tab: color(theme, saturation: 0.219, brightness: 0.949),
+            tabEdge: color(theme, saturation: 0.357, brightness: 0.549),
+            ink: color(theme, saturation: 0.329, brightness: 0.322),
+            composerControl: color(theme, saturation: 0.056, brightness: 0.98),
+            brand: color(theme, saturation: 0.47, brightness: 0.76),
+            priorityHigh: color(theme, saturation: 0.319, brightness: 0.91),
+            priorityLow: color(theme, saturation: 0.112, brightness: 0.985)
         )
+    }
+
+    static func swatch(for theme: StickyColorTheme) -> Color {
+        color(theme, saturation: 0.48, brightness: 0.82)
+    }
+
+    private static func color(
+        _ theme: StickyColorTheme,
+        saturation: Double,
+        brightness: Double
+    ) -> Color {
+        Color(hue: theme.hue, saturation: saturation, brightness: brightness)
+    }
+}
+
+private struct StickyPaperStyleKey: EnvironmentKey {
+    static let defaultValue = NotebookPaperPalette.style(theme: .rose)
+}
+
+private extension EnvironmentValues {
+    var stickyPaperStyle: NotebookPaperStyle {
+        get { self[StickyPaperStyleKey.self] }
+        set { self[StickyPaperStyleKey.self] = newValue }
     }
 }
 
@@ -88,10 +136,9 @@ private struct PaperSurface: View {
 
 private struct PaperTextureOverlay: View {
     var body: some View {
-        if let textureURL = Bundle.module.url(
+        if let textureURL = AppResources.url(
             forResource: "paper-texture",
-            withExtension: "png",
-            subdirectory: "Resources"
+            withExtension: "png"
         ), let texture = NSImage(contentsOf: textureURL) {
             Image(nsImage: texture)
                 .resizable(
@@ -116,12 +163,15 @@ struct ContentView: View {
     // 拖拽状态（放在父级，跨 child rebuild 保持稳定）
     @State private var draggingId: UUID? = nil
     @State private var dragAccumulated: CGFloat = 0
+    @State private var draggingPageId: UUID? = nil
+    @State private var pageDragOriginIndex: Int? = nil
     @State private var confettiBurst = 0
     @State private var showsCompletionConfetti = false
     @State private var isEditingPageTitle = false
     @State private var pageTitleText = ""
     @FocusState private var pageTitleFocused: Bool
     @State private var rowEditorFocused = false
+    @AppStorage("sticky.selectedColorTheme") private var selectedThemeRaw = StickyColorTheme.rose.rawValue
 
     init(store: TodoStore, onInteractionChange: @escaping (Bool) -> Void = { _ in }) {
         self._store = ObservedObject(wrappedValue: store)
@@ -130,9 +180,11 @@ struct ContentView: View {
 
     private var pending: [TodoItem] { store.todos.filter { !$0.completed } }
     private var completed: [TodoItem] { store.todos.filter { $0.completed } }
+    private var selectedTheme: StickyColorTheme {
+        StickyColorTheme(rawValue: selectedThemeRaw) ?? .rose
+    }
     private var activePaperStyle: NotebookPaperStyle {
-        let activePage = store.pages.first(where: { $0.id == store.activePageId }) ?? store.pages.first
-        return NotebookPaperPalette.style(hue: activePage?.colorHue)
+        NotebookPaperPalette.style(theme: selectedTheme)
     }
     private var displayPageTitle: String {
         let trimmed = store.activePageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,20 +194,22 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             outerWindow
+                .offset(x: 8, y: 4)
 
             bookmarkEdge
-                .offset(x: 330, y: 82)
+                .offset(x: 330, y: 86)
 
             if showsCompletionConfetti && !reduceMotion {
                 CompletionConfettiView(seed: confettiBurst)
                     .frame(width: 316, height: 250)
-                    .offset(x: 20, y: 68)
+                    .offset(x: 28, y: 72)
                     .allowsHitTesting(false)
                     .transition(.opacity)
                     .id(confettiBurst)
             }
         }
         .frame(width: 430, height: 430, alignment: .topLeading)
+        .environment(\.stickyPaperStyle, activePaperStyle)
         .environment(\.colorScheme, .light)
         .onChange(of: store.activePageId) {
             newTodoText = ""
@@ -169,6 +223,7 @@ struct ContentView: View {
         .onChange(of: inputFocused) { publishInteractionState() }
         .onChange(of: pageTitleFocused) { publishInteractionState() }
         .onChange(of: draggingId) { publishInteractionState() }
+        .onChange(of: draggingPageId) { publishInteractionState() }
         .onChange(of: rowEditorFocused) { publishInteractionState() }
         .onDisappear { onInteractionChange(false) }
     }
@@ -205,18 +260,17 @@ struct ContentView: View {
         .frame(width: 354, height: 410, alignment: .top)
         .background(PaperSurface(style: activePaperStyle, cornerRadius: 30))
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .shadow(color: Color.black.opacity(0.11), radius: 20, x: 5, y: 12)
         .overlay(
             RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .strokeBorder(activePaperStyle.tabEdge.opacity(0.16), lineWidth: 1)
+                .strokeBorder(activePaperStyle.tabEdge.opacity(0.14), lineWidth: 0.8)
         )
     }
 
     private var chromeBar: some View {
         HStack(alignment: .center, spacing: 10) {
-            trafficDot(Color(red: 1.0, green: 0.32, blue: 0.24))
-            trafficDot(Color(red: 1.0, green: 0.73, blue: 0.18))
-            trafficDot(Color(red: 0.26, green: 0.77, blue: 0.28))
+            ForEach(StickyColorTheme.allCases) { theme in
+                themeButton(theme)
+            }
 
             Spacer()
 
@@ -237,7 +291,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(activePaperStyle.brand)
                 .help("恢复刚刚删除的待办")
             }
 
@@ -254,12 +308,35 @@ struct ContentView: View {
         .frame(height: 58)
     }
 
-    private func trafficDot(_ color: Color) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: 14, height: 14)
-            .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.8))
-            .shadow(color: color.opacity(0.28), radius: 4, x: 0, y: 2)
+    private func themeButton(_ theme: StickyColorTheme) -> some View {
+        let color = NotebookPaperPalette.swatch(for: theme)
+        let isSelected = theme == selectedTheme
+
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+                selectedThemeRaw = theme.rawValue
+            }
+        } label: {
+            Circle()
+                .fill(color)
+                .frame(width: 14, height: 14)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.72), lineWidth: 0.8)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(activePaperStyle.ink.opacity(isSelected ? 0.58 : 0), lineWidth: 1.2)
+                        .padding(-3)
+                )
+                .shadow(color: color.opacity(isSelected ? 0.34 : 0.20), radius: isSelected ? 4 : 2, x: 0, y: 2)
+                .scaleEffect(isSelected ? 1 : 0.88)
+                .frame(width: 18, height: 18)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("切换为\(theme.displayName)主题")
+        .accessibilityLabel("\(theme.displayName)主题\(isSelected ? "，已选择" : "")")
     }
 
     // MARK: - Bookmark Sidebar
@@ -271,14 +348,33 @@ struct ContentView: View {
                     BookmarkButton(
                         page: page,
                         isActive: page.id == store.activePageId,
-                        action: { selectPage(page.id) }
+                        action: { selectPage(page.id) },
+                        openNote: { store.openObsidianNote(for: page.id) },
+                        editTitle: { beginPageTitleEditing(for: page.id) },
+                        canDelete: store.pages.count > 1,
+                        deletePage: { _ = store.deletePage(page.id) }
                     )
                     .offset(x: page.id == store.activePageId ? 0 : 14, y: CGFloat(index) * 31)
-                    .zIndex(page.id == store.activePageId ? 10 : Double(store.pages.count - index))
+                    .opacity(draggingPageId == page.id ? 0.68 : 1)
+                    .scaleEffect(draggingPageId == page.id ? 0.97 : 1)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                            .onChanged { value in
+                                updatePageDrag(page.id, translation: value.translation.height)
+                            }
+                            .onEnded { _ in
+                                finishPageDrag()
+                            }
+                    )
+                    .zIndex(
+                        draggingPageId == page.id
+                            ? 20
+                            : (page.id == store.activePageId ? 10 : Double(store.pages.count - index))
+                    )
                 }
 
                 if store.pages.count < 2 {
-                    GhostBookmarkButton(title: "灵感", hue: previewPageHue) {
+                    GhostBookmarkButton(title: "灵感") {
                         addPage(title: "灵感")
                     }
                     .offset(x: 14, y: CGFloat(store.pages.count) * 31)
@@ -298,12 +394,6 @@ struct ContentView: View {
         max(76, CGFloat(max(store.pages.count, 1)) * 31 + 48)
     }
 
-    private var previewPageHue: Double {
-        let usedHues = store.pages.compactMap(\.colorHue)
-        return (NotebookPaperPalette.defaultHue + Double(usedHues.count) * 0.61803398875)
-            .truncatingRemainder(dividingBy: 1)
-    }
-
     private var addPageButton: some View {
         Button { addPage(title: nil) } label: {
             Image(systemName: "plus")
@@ -315,7 +405,7 @@ struct ContentView: View {
         .foregroundStyle(activePaperStyle.ink.opacity(0.72))
         .background(Circle().fill(activePaperStyle.paperHighlight))
         .overlay(Circle().strokeBorder(activePaperStyle.tabEdge.opacity(0.20), lineWidth: 0.7))
-        .shadow(color: activePaperStyle.tabEdge.opacity(0.12), radius: 3, x: 1, y: 2)
+        .shadow(color: activePaperStyle.tabEdge.opacity(0.07), radius: 2, x: 0, y: 1)
         .help("新建便贴")
     }
 
@@ -336,6 +426,47 @@ struct ContentView: View {
         }
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             store.addPage(title: title)
+        }
+    }
+
+    private func updatePageDrag(_ pageId: UUID, translation: CGFloat) {
+        if draggingPageId == nil {
+            guard let originIndex = store.pages.firstIndex(where: { $0.id == pageId }) else { return }
+            draggingPageId = pageId
+            pageDragOriginIndex = originIndex
+        }
+
+        guard draggingPageId == pageId,
+              let originIndex = pageDragOriginIndex,
+              let currentIndex = store.pages.firstIndex(where: { $0.id == pageId }) else { return }
+
+        let step = Int((translation / 31).rounded())
+        let targetIndex = min(max(originIndex + step, 0), store.pages.count - 1)
+        guard targetIndex != currentIndex else { return }
+
+        withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.84)) {
+            store.movePage(pageId, toIndex: targetIndex)
+        }
+    }
+
+    private func finishPageDrag() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+            draggingPageId = nil
+            pageDragOriginIndex = nil
+        }
+    }
+
+    private func beginPageTitleEditing(for pageId: UUID? = nil) {
+        if let pageId, pageId != store.activePageId {
+            store.selectPage(pageId)
+        }
+
+        DispatchQueue.main.async {
+            pageTitleText = store.activePageTitle
+            isEditingPageTitle = true
+            DispatchQueue.main.async {
+                pageTitleFocused = true
+            }
         }
     }
 
@@ -367,9 +498,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
-                            pageTitleText = store.activePageTitle
-                            isEditingPageTitle = true
-                            pageTitleFocused = true
+                            beginPageTitleEditing()
                         }
                 }
 
@@ -396,7 +525,7 @@ struct ContentView: View {
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    allDone ? Theme.brand : Theme.accent,
+                    allDone ? activePaperStyle.brand : Theme.accent,
                     style: StrokeStyle(lineWidth: 2, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -405,7 +534,7 @@ struct ContentView: View {
             if allDone {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(activePaperStyle.brand)
                     .transition(.scale.combined(with: .opacity))
             }
         }
@@ -615,7 +744,13 @@ struct ContentView: View {
     }
 
     private func publishInteractionState() {
-        onInteractionChange(inputFocused || pageTitleFocused || rowEditorFocused || draggingId != nil)
+        onInteractionChange(
+            inputFocused
+                || pageTitleFocused
+                || rowEditorFocused
+                || draggingId != nil
+                || draggingPageId != nil
+        )
     }
 }
 
@@ -623,37 +758,97 @@ private struct BookmarkButton: View {
     let page: TodoPage
     let isActive: Bool
     let action: () -> Void
-
-    private var paperStyle: NotebookPaperStyle {
-        NotebookPaperPalette.style(hue: page.colorHue)
-    }
+    let openNote: () -> Void
+    let editTitle: () -> Void
+    let canDelete: Bool
+    let deletePage: () -> Void
+    @State private var isHovering = false
+    @State private var showsDeleteConfirmation = false
+    @Environment(\.stickyPaperStyle) private var paperStyle
 
     private var displayTitle: String {
         let trimmed = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "未命名" : trimmed
     }
 
-    private var shortTitle: String {
-        String(displayTitle.prefix(2))
+    private var tabFill: Color {
+        switch page.priority {
+        case .high:
+            return paperStyle.priorityHigh
+        case .normal:
+            return paperStyle.tab
+        case .low:
+            return paperStyle.priorityLow
+        }
+    }
+
+    private var priorityEdgeOpacity: Double {
+        switch page.priority {
+        case .high: return isActive ? 0.58 : 0.42
+        case .normal: return isActive ? 0.32 : 0.10
+        case .low: return isActive ? 0.24 : 0.07
+        }
     }
 
     var body: some View {
-        Button(action: action) {
-            Text(shortTitle)
-                .font(.system(size: isActive ? 15 : 12, weight: isActive ? .bold : .semibold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, isActive ? 19 : 13)
-                .padding(.trailing, 11)
-                .frame(width: isActive ? 100 : 72, height: 34, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: isActive ? 10 : 8, style: .continuous))
+        ZStack(alignment: .leading) {
+            Button(action: action) {
+                Text(displayTitle)
+                    .font(.system(size: isActive ? 15 : 12, weight: isActive ? .bold : .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .allowsTightening(true)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, isActive || isHovering ? 29 : 13)
+                    .padding(.trailing, isHovering && canDelete ? 25 : 11)
+                    .frame(width: isActive ? 92 : 72, height: 34, alignment: .leading)
+                    .contentShape(RoundedRectangle(cornerRadius: isActive ? 10 : 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(
+                TapGesture(count: 2)
+                    .onEnded(editTitle)
+            )
+
+            Button(action: openNote) {
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 24, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(paperStyle.ink.opacity(isActive ? 0.72 : 0.58))
+            .opacity(isActive || isHovering ? 1 : 0)
+            .allowsHitTesting(isActive || isHovering)
+            .padding(.leading, 3)
+            .help("在 Obsidian 中打开 \(displayTitle)")
+            .accessibilityLabel("在 Obsidian 中打开 \(displayTitle)")
+
+            if canDelete {
+                Button {
+                    showsDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 22, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(paperStyle.ink.opacity(0.52))
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .padding(.trailing, 3)
+                .frame(width: isActive ? 92 : 72, alignment: .trailing)
+                .help("删除标签")
+                .accessibilityLabel("删除标签 \(displayTitle)")
+            }
         }
-        .buttonStyle(.plain)
+        .frame(width: isActive ? 92 : 72, height: 34)
         .foregroundStyle(isActive ? paperStyle.ink : paperStyle.ink.opacity(0.72))
         .background(
             RoundedRectangle(cornerRadius: isActive ? 10 : 8, style: .continuous)
-                .fill(paperStyle.tab)
+                .fill(tabFill)
                 .overlay(alignment: .top) {
                     RoundedRectangle(cornerRadius: isActive ? 10 : 8, style: .continuous)
                         .fill(
@@ -665,41 +860,48 @@ private struct BookmarkButton: View {
                         )
                 }
                 .shadow(
-                    color: paperStyle.tabEdge.opacity(isActive ? 0.28 : 0.14),
-                    radius: isActive ? 8 : 2,
-                    x: 2,
-                    y: isActive ? 5 : 2
+                    color: paperStyle.tabEdge.opacity(isActive ? 0.12 : 0.07),
+                    radius: isActive ? 3 : 1.5,
+                    x: 0,
+                    y: 1
                 )
         )
         .overlay(
             Group {
                 if isActive {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(paperStyle.tabEdge.opacity(0.32), lineWidth: 0.9)
+                        .strokeBorder(paperStyle.tabEdge.opacity(priorityEdgeOpacity), lineWidth: 0.9)
                 }
             }
         )
-        .overlay(alignment: .leading) {
-            if isActive {
-                Capsule()
-                    .fill(paperStyle.tabEdge.opacity(0.28))
-                    .frame(width: 3, height: 21)
-                    .padding(.leading, 9)
+        .help("\(displayTitle) · \(page.priority.displayName)重要性 · 拖动排序 · 双击重命名")
+        .zIndex(isActive ? 10 : 1)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: isHovering)
+        .contextMenu {
+            Button("重命名标签", action: editTitle)
+            Button("在 Obsidian 中打开", action: openNote)
+            if canDelete {
+                Divider()
+                Button("删除标签", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
             }
         }
-        .help(displayTitle)
-        .zIndex(isActive ? 10 : 1)
+        .alert("删除“\(displayTitle)”？", isPresented: $showsDeleteConfirmation) {
+            Button("删除标签", role: .destructive, action: deletePage)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("标签及其中的任务将被删除，对应的 Obsidian 笔记会移入废纸篓。")
+        }
     }
+
 }
 
 private struct GhostBookmarkButton: View {
     let title: String
-    let hue: Double
     let action: () -> Void
-
-    private var paperStyle: NotebookPaperStyle {
-        NotebookPaperPalette.style(hue: hue)
-    }
+    @Environment(\.stickyPaperStyle) private var paperStyle
 
     var body: some View {
         Button(action: action) {
@@ -717,7 +919,10 @@ private struct GhostBookmarkButton: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(paperStyle.tab)
         )
-        .shadow(color: paperStyle.tabEdge.opacity(0.14), radius: 2, x: 1, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(paperStyle.tabEdge.opacity(0.10), lineWidth: 0.6)
+        )
         .help(title)
     }
 }
@@ -740,6 +945,9 @@ struct TodoRowContent: View {
     @State private var isEditingTitle = false
     @State private var titleText = ""
     @FocusState private var titleFocused: Bool
+    @State private var showsReminderPopover = false
+    @State private var reminderDate = Date()
+    @Environment(\.stickyPaperStyle) private var paperStyle
 
     private var hasNote: Bool { !item.note.isEmpty }
 
@@ -749,7 +957,7 @@ struct TodoRowContent: View {
                 ZStack {
                     if item.completed {
                         Circle()
-                            .fill(Theme.brand)
+                            .fill(paperStyle.brand)
                             .frame(width: 20, height: 20)
                             .overlay(
                                 Image(systemName: "checkmark")
@@ -817,6 +1025,10 @@ struct TodoRowContent: View {
                         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: item.completed)
                 }
 
+                if item.reminderDate != nil || isHovering || showsReminderPopover {
+                    reminderButton
+                }
+
                 if hasNote || isHovering || isExpanded {
                     noteButton
                 }
@@ -877,12 +1089,106 @@ struct TodoRowContent: View {
             if !noteFocused { noteText = item.note }
         }
         .onChange(of: titleFocused) {
-            onInteractionChange(titleFocused || noteFocused)
+            publishInteractionState()
         }
         .onChange(of: noteFocused) {
-            onInteractionChange(titleFocused || noteFocused)
+            publishInteractionState()
+        }
+        .onChange(of: showsReminderPopover) {
+            publishInteractionState()
         }
         .onDisappear { onInteractionChange(false) }
+    }
+
+    private var reminderButton: some View {
+        Button {
+            reminderDate = item.reminderDate ?? store.suggestedReminderDate(for: item.text)
+            showsReminderPopover = true
+        } label: {
+            Image(systemName: item.reminderDate == nil ? "bell" : "bell.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(item.reminderDate == nil ? Theme.textTertiary : paperStyle.brand)
+                .frame(width: 20, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(reminderHelpText)
+        .accessibilityLabel(reminderHelpText)
+        .popover(isPresented: $showsReminderPopover, arrowEdge: .trailing) {
+            reminderPopover
+        }
+    }
+
+    private var reminderPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "bell.fill")
+                    .foregroundStyle(paperStyle.brand)
+                Text("事项提醒")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+            }
+
+            Text(item.text)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+
+            DatePicker(
+                "提醒时间",
+                selection: $reminderDate,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.field)
+            .font(.system(size: 12, design: .rounded))
+
+            Text(reminderProviderDescription)
+                .font(.system(size: 11, design: .rounded))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            HStack {
+                if item.reminderDate != nil {
+                    Button("移除提醒", role: .destructive) {
+                        store.removeReminder(item)
+                        showsReminderPopover = false
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.red.opacity(0.75))
+                }
+
+                Spacer()
+
+                Button("设置提醒") {
+                    store.setReminder(item, at: reminderDate)
+                    showsReminderPopover = false
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(paperStyle.brand)
+                .controlSize(.small)
+                .disabled(reminderDate <= Date())
+            }
+        }
+        .padding(16)
+        .frame(width: 286)
+    }
+
+    private var reminderHelpText: String {
+        guard let date = item.reminderDate else { return "设置提醒" }
+        return "提醒：\(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private var reminderProviderDescription: String {
+        switch item.reminderProvider {
+        case .appleReminders:
+            return "已同步到 Apple「提醒事项」的 Sticky 列表。"
+        case .localNotification:
+            return "当前由 Sticky 的系统通知提醒。"
+        case .none:
+            return "优先同步到 Apple「提醒事项」；若权限不可用，则使用 Sticky 系统通知。"
+        }
     }
 
     private var noteButton: some View {
@@ -931,7 +1237,7 @@ struct TodoRowContent: View {
                 .padding(.leading, 36)
                 .padding(.trailing, 8)
                 .onChange(of: noteFocused) {
-                    onInteractionChange(titleFocused || noteFocused)
+                    publishInteractionState()
                 }
                 .onChange(of: noteText) {
                     store.updateNote(item, note: noteText)
@@ -973,6 +1279,10 @@ struct TodoRowContent: View {
 
         isEditingTitle = false
     }
+
+    private func publishInteractionState() {
+        onInteractionChange(titleFocused || noteFocused || showsReminderPopover)
+    }
 }
 
 // MARK: - Completion Celebration
@@ -981,6 +1291,7 @@ private struct CompletionConfettiView: View {
     let seed: Int
 
     @State private var isExpanded = false
+    @Environment(\.stickyPaperStyle) private var paperStyle
 
     private var pieces: [ConfettiPiece] {
         (0..<88).map { ConfettiPiece(index: $0, seed: seed) }
@@ -1003,7 +1314,7 @@ private struct CompletionConfettiView: View {
             }
 
             Circle()
-                .strokeBorder(Theme.brand.opacity(isExpanded ? 0 : 0.35), lineWidth: 2)
+                .strokeBorder(paperStyle.brand.opacity(isExpanded ? 0 : 0.35), lineWidth: 2)
                 .frame(width: isExpanded ? 154 : 18, height: isExpanded ? 154 : 18)
                 .position(x: 160, y: 62)
                 .opacity(isExpanded ? 0 : 1)
@@ -1103,10 +1414,9 @@ private final class CompletionSoundPlayer: NSObject, NSSoundDelegate {
     }
 
     private func playBell() {
-        guard let soundURL = Bundle.module.url(
+        guard let soundURL = AppResources.url(
             forResource: "task-complete-bell",
-            withExtension: "wav",
-            subdirectory: "Resources"
+            withExtension: "wav"
         ), let sound = NSSound(contentsOf: soundURL, byReference: false) else {
             NSSound.beep()
             return

@@ -8,10 +8,7 @@ let package = Package(
         .executableTarget(
             name: "FloatingTodo",
             path: "FloatingTodo",
-            exclude: ["Assets.xcassets"],
-            resources: [
-                .copy("Resources")
-            ],
+            exclude: ["Assets.xcassets", "Resources"],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

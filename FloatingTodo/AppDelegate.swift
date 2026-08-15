@@ -1,10 +1,13 @@
 import Cocoa
 import SwiftUI
+import Carbon.HIToolbox
+import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var panel: FloatingPanel!
     private var statusItem: NSStatusItem!
     private var store = TodoStore()
+    private var globalHotKey: GlobalHotKey?
 
     private var isShowing = false
     private var isAnimating = false
@@ -18,9 +21,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let panelMaxHeight: CGFloat = 430
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
         setupStatusItem()
         setupPanel()
         setupEditMenu()
+        setupGlobalHotKey()
         
         // 自动弹出版面，避免图标被状态栏挡住而找不到
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -30,6 +35,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store.saveImmediately()
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if !self.isShowing {
+                self.showPanel(activateApp: true)
+            }
+        }
+        completionHandler()
     }
 
     private func setupEditMenu() {
@@ -57,19 +84,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    // MARK: - Global shortcut
+
+    private func setupGlobalHotKey() {
+        do {
+            globalHotKey = try GlobalHotKey(
+                keyCode: UInt32(kVK_ANSI_S),
+                modifiers: UInt32(optionKey | cmdKey)
+            ) { [weak self] in
+                DispatchQueue.main.async {
+                    self?.togglePanelVisibility()
+                }
+            }
+        } catch {
+            print("Failed to register global shortcut: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Status Bar
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            if let iconURL = Bundle.module.url(forResource: "StatusBarIcon", withExtension: "png", subdirectory: "Resources"),
+            if let iconURL = AppResources.url(forResource: "StatusBarIcon", withExtension: "png"),
                let icon = NSImage(contentsOf: iconURL) {
-                icon.isTemplate = false  // 彩色图标，不用模板模式
-                icon.size = NSSize(width: 18, height: 18)
+                // 保留原始图钉造型，只让系统接管颜色与高亮状态。
+                icon.isTemplate = true
+                icon.size = NSSize(width: 11.3, height: 16)
                 button.image = icon
             } else {
-                button.title = "📌"  // fallback
+                button.title = "●"
             }
+            button.imagePosition = .imageOnly
             button.action = #selector(statusBarClicked)
             button.target = self
             // Left click to toggle, right click for menu
@@ -82,6 +128,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Right click -> show menu
         if event?.type == .rightMouseUp {
             let menu = NSMenu()
+            let toggleItem = NSMenuItem(title: "显示/隐藏（⌥⌘S）", action: #selector(togglePanelVisibility), keyEquivalent: "")
+            toggleItem.target = self
+            menu.addItem(toggleItem)
             menu.addItem(NSMenuItem(title: "复制待办 Markdown", action: #selector(copyMarkdown), keyEquivalent: "c"))
             if let syncErrorMessage = store.syncErrorMessage {
                 let errorItem = NSMenuItem(title: syncErrorMessage, action: nil, keyEquivalent: "")
@@ -135,8 +184,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Show / Hide
 
-    private func showPanel() {
+    private func showPanel(activateApp: Bool = false) {
         guard !isShowing, !isAnimating else { return }
+
+        if activateApp {
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         let buttonWin = statusItem.button?.window
         guard let screen = buttonWin?.screen ?? NSScreen.main else { return }
@@ -169,6 +222,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.isShowing = true
             self.isAnimating = false
+            if activateApp {
+                self.panel.makeKey()
+            }
             self.startCollapsePoll()
         })
     }
@@ -235,6 +291,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Actions
+
+    @objc private func togglePanelVisibility() {
+        if isShowing {
+            hidePanel()
+        } else if !isAnimating {
+            showPanel(activateApp: true)
+        }
+    }
 
     @objc private func copyMarkdown() {
         let pasteboard = NSPasteboard.general
