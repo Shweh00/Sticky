@@ -444,15 +444,24 @@ class TodoStore: ObservableObject {
 
         guard let page = pages.first(where: { $0.id == pageId }) else { return }
 
+        let noteURL = pageMarkdownURL(for: page).deletingPathExtension().standardizedFileURL
+        let fallbackRoot = markdownURL.deletingLastPathComponent().standardizedFileURL
+        let vaultRoot = obsidianVaultRoot(containing: noteURL) ?? fallbackRoot
+        let rootComponents = vaultRoot.pathComponents
+        let noteComponents = noteURL.pathComponents
+        let relativeNotePath: String
+        if noteComponents.starts(with: rootComponents) {
+            relativeNotePath = noteComponents.dropFirst(rootComponents.count).joined(separator: "/")
+        } else {
+            relativeNotePath = "\(pageNotesDirectoryName)/\(noteURL.lastPathComponent)"
+        }
+
         var components = URLComponents()
         components.scheme = "obsidian"
         components.host = "open"
         components.queryItems = [
-            URLQueryItem(name: "vault", value: markdownURL.deletingLastPathComponent().lastPathComponent),
-            URLQueryItem(
-                name: "file",
-                value: "\(pageNotesDirectoryName)/\(pageMarkdownURL(for: page).deletingPathExtension().lastPathComponent)"
-            ),
+            URLQueryItem(name: "vault", value: vaultRoot.lastPathComponent),
+            URLQueryItem(name: "file", value: relativeNotePath),
         ]
 
         if let obsidianURL = components.url, NSWorkspace.shared.open(obsidianURL) {
@@ -460,6 +469,25 @@ class TodoStore: ObservableObject {
         }
 
         NSWorkspace.shared.open(pageMarkdownURL(for: page))
+    }
+
+    private func obsidianVaultRoot(containing fileURL: URL) -> URL? {
+        var directory = fileURL.deletingLastPathComponent().standardizedFileURL
+
+        while directory.path != "/" {
+            let settingsDirectory = directory.appendingPathComponent(".obsidian", isDirectory: true)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: settingsDirectory.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return directory
+            }
+
+            let parent = directory.deletingLastPathComponent().standardizedFileURL
+            guard parent.path != directory.path else { break }
+            directory = parent
+        }
+
+        return nil
     }
 
     private var pageNotesDirectoryURL: URL {
