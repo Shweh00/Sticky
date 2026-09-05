@@ -54,7 +54,7 @@ cp "$ROOT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ROOT_DIR/FloatingTodo/Resources/"* "$APP_BUNDLE/Contents/Resources/"
 
 codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
-lipo -verify_arch arm64 x86_64 "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+lipo "$APP_BUNDLE/Contents/MacOS/$APP_NAME" -verify_arch arm64 x86_64
 codesign --verify --deep --strict "$APP_BUNDLE"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
