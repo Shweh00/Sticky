@@ -55,7 +55,7 @@ Sticky 会在安全标记范围内更新任务，并监听 Obsidian 中的改动
 需要 Xcode Command Line Tools：
 
 ```bash
-git clone https://github.com/SEA-ledger/Sticky.git
+git clone https://github.com/Shweh00/Sticky.git
 cd Sticky
 ./script/install_swift_app.sh
 ```
