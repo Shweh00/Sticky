@@ -25,7 +25,8 @@ if git ls-files --error-unmatch "Floating Todo.md" >/dev/null 2>&1 \
   exit 1
 fi
 
-if git grep -nE '/Users/(shweh|andreas)/|Library/Mobile Documents/iCloud~md~obsidian' -- .; then
+if git grep -nE '/Users/(shweh|andreas)/|Library/Mobile Documents/iCloud~md~obsidian' \
+  -- . ':(exclude)script/package_release.sh'; then
   echo "Refusing to package: a personal absolute path is present in tracked files." >&2
   exit 1
 fi
